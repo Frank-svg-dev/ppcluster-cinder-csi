@@ -72,7 +72,7 @@ func (op *OpenStackPhy) DeleteVolume(volumeID string) error {
 func (op *OpenStackPhy) AttachVolume(instanceID, volumeID string) error {
 	ctx := context.Background()
 
-	connector, err := op.GetConnector(volumeID)
+	connector, err := op.GetConnector(instanceID)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get connector", "instance_id", instanceID)
 		return err

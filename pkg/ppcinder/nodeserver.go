@@ -29,6 +29,7 @@ func (n *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolu
 	stagingTarget := req.GetStagingTargetPath()
 	volumeCapability := req.GetVolumeCapability()
 	volumeID := req.GetVolumeId()
+	pvInfo := req.GetPublishContext()
 
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume Id not provided")
@@ -51,10 +52,8 @@ func (n *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolu
 
 	m := n.Mount
 	// Do not trust the path provided by cinder, get the real path on node
-	devicePath, err := getDevicePath(volumeID, m)
-	if err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("Unable to find Device path for volume: %v", err))
-	}
+	fmt.Println(pvInfo["DevicePath"])
+	devicePath := pvInfo["DevicePath"]
 
 	if blk := volumeCapability.GetBlock(); blk != nil {
 		// If block volume, do nothing
@@ -143,6 +142,7 @@ func (n *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublish
 
 	volumeID := req.GetVolumeId()
 	source := req.GetStagingTargetPath()
+	fmt.Println(source)
 	targetPath := req.GetTargetPath()
 	volumeCapability := req.GetVolumeCapability()
 

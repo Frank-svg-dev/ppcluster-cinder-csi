@@ -1,0 +1,217 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: csi-ppcinder-nodeplugin
+  namespace: kube-system
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: csi-ppcinder-nodeplugin
+  template:
+    metadata:
+      labels:
+        app: csi-ppcinder-nodeplugin
+    spec:
+      serviceAccountName: csi-cinder-node-sa
+      hostNetwork: true
+      hostPID: true
+      priorityClassName: system-node-critical
+      nodeSelector:
+        ppcinder-csi: enabled
+      containers:
+      - args:
+        - --csi-address=$(ADDRESS)
+        - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+        env:
+        - name: ADDRESS
+          value: /csi/csi.sock
+        - name: DRIVER_REG_SOCK_PATH
+          value: /var/lib/kubelet/plugins/cinder.csi.ppcluster.com/csi.sock
+        - name: KUBE_NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        image: k8s-gcr.m.daocloud.io/sig-storage/csi-node-driver-registrar:v2.5.0
+        imagePullPolicy: IfNotPresent
+        name: node-driver-registrar
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /csi
+          name: socket-dir
+        - mountPath: /registration
+          name: registration-dir
+      - args:
+        - --csi-address=/csi/csi.sock
+        image: k8s-gcr.m.daocloud.io/sig-storage/livenessprobe:v2.6.0
+        imagePullPolicy: IfNotPresent
+        name: liveness-probe
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /csi
+          name: socket-dir
+      - args:
+         - /bin/python3
+         - /server.py
+        env:
+        - name: KUBECONFIG
+          value: /kubeconfig
+        image: core.harbor.domain/library/iscsi-csi-briage:rbd
+        imagePullPolicy: IfNotPresent
+        name: iscsi-csi-bridge
+        resources: {}
+        securityContext:
+           privileged: true
+           allowPrivilegeEscalation: true
+           runAsUser: 0
+           runAsGroup: 0
+           capabilities:
+             add: ["SYS_ADMIN"]
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /etc/ceph
+            name: cephdir
+          - mountPath: /usr/local/bin/kubectl
+            name: kubectl
+          - mountPath: /kubeconfig
+            name: kubeconfig
+          - mountPath: /server-okk.py
+            name: iscsi-server
+          - mountPath: /etc/iscsi
+            name: iscsidir
+          - mountPath: /etc/multipath
+            name: multipathdir
+          - mountPath: /etc/multipath.conf
+            name: multipath-conf
+          - mountPath: /lib/modules
+            name: lib-modules
+            readOnly: true
+          - mountPath: /sys
+            name: host-sys
+          - mountPath: /dev
+            name: pods-probe-dir
+      - args:
+        - /bin/cinder-csi-ppcluster
+        - --endpoint=$(CSI_ENDPOINT)
+        - --cloud-config=$(CLOUD_CONFIG)
+        env:
+        - name: CSI_ENDPOINT
+          value: unix://csi/csi.sock
+        - name: CLOUD_CONFIG
+          value: /etc/config/cloud.conf
+            #image: docker.m.daocloud.io/k8scloudprovider/cinder-csi-plugin:latest
+        image: core.harbor.domain/library/cinder-csi-ppcluster:v1
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /healthz
+            port: healthz
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: cinder-csi-plugin
+        ports:
+        - containerPort: 9808
+          name: healthz
+          protocol: TCP
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /csi
+          name: socket-dir
+        - mountPath: /var/lib/kubelet
+          mountPropagation: Bidirectional
+          name: kubelet-dir
+        - mountPath: /dev
+          mountPropagation: HostToContainer
+          name: pods-probe-dir
+        - mountPath: /etc/config
+          name: secret-cinderplugin
+          readOnly: true
+        - mountPath: /sys
+          name: host-sys
+        - mountPath: /lib/modules
+          name: lib-modules
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: csi-cinder-node-sa
+      serviceAccountName: csi-cinder-node-sa
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/plugins/cinder.csi.ppcluster.com
+          type: DirectoryOrCreate
+        name: socket-dir
+      - hostPath:
+          path: /var/lib/kubelet/plugins_registry/
+          type: Directory
+        name: registration-dir
+      - hostPath:
+          path: /var/lib/kubelet
+          type: Directory
+        name: kubelet-dir
+      - hostPath:
+           path: /usr/local/bin/kubectl
+           type: File
+        name: kubectl
+      - hostPath:
+           path: /root/.kube/config
+           type: File
+        name: kubeconfig
+      - hostPath:
+           path: /etc/multipath
+           type: Directory
+        name: multipathdir
+      - hostPath:
+           path: /root/pfxcsi-test/deploy/server.py
+           type: File
+        name: iscsi-server
+      - hostPath:
+           path: /etc/multipath.conf
+           type: File
+        name: multipath-conf
+      - hostPath:
+          path: /dev
+          type: Directory
+        name: pods-probe-dir
+      - hostPath:
+           path: /etc/ceph
+           type: Directory
+        name: cephdir
+      - hostPath:
+           path: /sys
+           type: Directory
+        name: host-sys
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - hostPath:
+           path: /etc/iscsi/
+           type: Directory
+        name: iscsidir
+      - name: secret-cinderplugin
+        secret:
+          defaultMode: 420
+          secretName: cloud-config

@@ -1,0 +1,10 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cinder-ppcluster
+parameters:
+  availability: default-az
+  type: hdd
+provisioner: cinder.csi.ppcluster.com
+reclaimPolicy: Delete
+volumeBindingMode: Immediate

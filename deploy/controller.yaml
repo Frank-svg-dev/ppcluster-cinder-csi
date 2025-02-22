@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: csi-ppcinder-controllerplugin
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: csi-ppcinder-controllerplugin
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: csi-ppcinder-controllerplugin
+    spec:
+      nodeSelector:
+         ppcsi-controller: enabled
+      containers:
+      - args:
+        - --csi-address=$(ADDRESS)
+        - --timeout=3m
+        - --leader-election=true
+        env:
+        - name: ADDRESS
+          value: /var/lib/csi/sockets/pluginproxy/csi.sock
+        image: k8s-gcr.m.daocloud.io/sig-storage/csi-attacher:v3.4.0
+        imagePullPolicy: IfNotPresent
+        name: csi-attacher
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/csi/sockets/pluginproxy/
+          name: socket-dir
+      - args:
+        - --csi-address=$(ADDRESS)
+        - --timeout=3m
+        - --default-fstype=ext4
+        - --feature-gates=Topology=true
+        - --extra-create-metadata
+        - --leader-election=true
+        env:
+        - name: ADDRESS
+          value: /var/lib/csi/sockets/pluginproxy/csi.sock
+        image: k8s-gcr.m.daocloud.io/sig-storage/csi-provisioner:v3.1.0
+        imagePullPolicy: IfNotPresent
+        name: csi-provisioner
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/csi/sockets/pluginproxy/
+          name: socket-dir
+      - args:
+        - --csi-address=$(ADDRESS)
+        env:
+        - name: ADDRESS
+          value: /var/lib/csi/sockets/pluginproxy/csi.sock
+        image: k8s-gcr.m.daocloud.io/sig-storage/livenessprobe:v2.6.0
+        imagePullPolicy: IfNotPresent
+        name: liveness-probe
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/csi/sockets/pluginproxy/
+          name: socket-dir
+      - args:
+        - /bin/cinder-csi-ppcluster
+        - --endpoint=$(CSI_ENDPOINT)
+        - --cloud-config=$(CLOUD_CONFIG)
+        - --cluster=$(CLUSTER_NAME)
+        env:
+        - name: CSI_ENDPOINT
+          value: unix://csi/csi.sock
+        - name: CLOUD_CONFIG
+          value: /etc/config/cloud.conf
+        - name: CLUSTER_NAME
+          value: kubernetes
+            #image: docker.m.daocloud.io/k8scloudprovider/cinder-csi-plugin:latest
+        image: core.harbor.domain/library/cinder-csi-ppcluster:v1
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /healthz
+            port: healthz
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 60
+          successThreshold: 1
+          timeoutSeconds: 10
+        name: cinder-csi-plugin
+        ports:
+        - containerPort: 9808
+          name: healthz
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /csi
+          name: socket-dir
+        - mountPath: /etc/config
+          name: secret-cinderplugin
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: csi-cinder-controller-sa
+      serviceAccountName: csi-cinder-controller-sa
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: socket-dir
+      - name: secret-cinderplugin
+        secret:
+          defaultMode: 420
+          secretName: cloud-config
